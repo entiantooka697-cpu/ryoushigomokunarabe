@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>量子五目並べ</title>
+    <style>
+        :root {
+            --board-color: #f4d09f;
+            --line-color: #5c4033;
+            --cell-size: 45px;      /* 1マスの大きさ */
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+            text-align: center;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 { margin-bottom: 5px; color: #333; }
+
+        #status-area {
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: inline-block;
+            min-width: 300px;
+        }
+
+        #turn-info {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .turn-first { color: #333; } 
+        .turn-second { color: #555; } 
+
+        #next-prob {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 5px 0;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background-color: #fff;
+            display: inline-block;
+            border: 2px solid #ccc;
+        }
+
+        #controls {
+            margin-top: 10px;
+        }
+
+        /* 観測確認モーダル / パネル領域 */
+        #observation-prompt {
+            display: none;
+            background-color: #fff3cd;
+            border: 2px solid #ffeeba;
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+
+        button {
+            padding: 8px 16px;
+            font-size: 15px;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+
+        .btn-observe-yes { background-color: #dc3545; color: white; margin-right: 5px; }
+        .btn-observe-yes:hover { background-color: #c82333; }
+
+        .btn-observe-no { background-color: #6c757d; color: white; }
+        .btn-observe-no:hover { background-color: #5a6268; }
+
+        #restart-btn {
+            background-color: #28a745;
+            color: white;
+            display: none; /* 初期状態は非表示 */
+            margin-top: 5px;
+        }
+        #restart-btn:hover { background-color: #218838; }
+        
+        /* 盤面コンテナ（外枠と余白） */
+        #board-container {
+            position: relative;
+            display: inline-block;
+            padding: calc(var(--cell-size) / 2);
+            background-color: var(--board-color);
+            border: 3px solid #5c4033;
+            border-radius: 4px;
+            box-shadow: 5px 5px 15px rgba(0,0,0,0.3);
+            margin-top: 10px;
+        }
+
+        #grid {
+            position: relative;
+            /* 9x9の交点 = 8x8マス */
+            width: calc(var(--cell-size) * 8);
+            height: calc(var(--cell-size) * 8);
+            background-image: 
+                linear-gradient(to right, var(--line-color) 1.5px, transparent 1.5px),
+                linear-gradient(to bottom, var(--line-color) 1.5px, transparent 1.5px);
+            background-size: var(--cell-size) var(--cell-size);
+            background-position: 0 0;
+            border: 1.5px solid var(--line-color);
+        }
+
+        /* クリック用エリア（格子点に正確に一致させる） */
+        .intersection-area {
+            position: absolute;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 10;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        /* マウスホバー時のプレビューガイド */
+        .intersection-area:hover::after {
+            content: "";
+            position: absolute;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background-color: rgba(0, 123, 255, 0.4);
+            border: 2px dashed #0056b3;
+        }
+
+        /* 石の共通スタイル */
+        .stone {
+            position: absolute;
+            border-radius: 50%;
+            z-index: 5; 
+            pointer-events: none; 
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.4);
+            transform: translate(-50%, -50%);
+        }
+
+        /* 確定した石 */
+        .stone-black {
+            background-color: #111;
+            width: 40px; height: 40px;
+        }
+        .stone-white {
+            background-color: #fff;
+            border: 1px solid #333;
+            width: 40px; height: 40px;
+        }
+
+        /* 量子状態の石 (数字表示) */
+        .stone-quantum {
+            width: 38px; height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 0 3px #000, 0 0 3px #000;
+            border: 2px solid rgba(255,255,255,0.7);
+        }
+
+        /* 囲碁の星（点） */
+        .star-point {
+            position: absolute;
+            width: 7px; 
+            height: 7px;
+            background-color: var(--line-color);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2;
+            pointer-events: none;
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1>量子五目並べ</h1>
+    
+    <div id="status-area">
+        <div id="turn-info" class="turn-first">先攻のターン (黒) の石を置く場所を選んでください</div>
+        <div id="prob-display">次に置く石の確率 (黒になる確率): <span id="next-prob">90%</span></div>
+        
+        <!-- ターン後半：実際に5目並ぶ可能性（5つ以上の石が重なるライン）があるときだけ現れる選択エリア -->
+        <div id="observation-prompt">
+            <div style="font-size: 15px; font-weight: bold; margin-bottom: 8px; color: #856404;">
+                縦・横・斜めのいずれかに5個以上の石が並ぶ可能性があります。このターンで盤面を観測しますか？
+            </div>
+            <button class="btn-observe-yes" onclick="resolveTurn(true)">はい（観測して勝負！）</button>
+            <button class="btn-observe-no" onclick="resolveTurn(false)">いいえ（そのまま次へ）</button>
+        </div>
+
+        <div id="controls">
+            <button id="restart-btn" onclick="initBoard()">もう一戦する</button>
+        </div>
+    </div>
+    <br>
+
+    <div id="board-container">
+        <!-- 囲碁の星（9x9盤面の星の位置：2-2, 6-2, 4-4(天元), 2-6, 6-6） -->
+        <div class="star-point" style="left: calc(var(--cell-size) / 2 + 2 * var(--cell-size)); top: calc(var(--cell-size) / 2 + 2 * var(--cell-size));"></div>
+        <div class="star-point" style="left: calc(var(--cell-size) / 2 + 6 * var(--cell-size)); top: calc(var(--cell-size) / 2 + 2 * var(--cell-size));"></div>
+        <div class="star-point" style="left: calc(var(--cell-size) / 2 + 4 * var(--cell-size)); top: calc(var(--cell-size) / 2 + 4 * var(--cell-size));"></div>
+        <div class="star-point" style="left: calc(var(--cell-size) / 2 + 2 * var(--cell-size)); top: calc(var(--cell-size) / 2 + 6 * var(--cell-size));"></div>
+        <div class="star-point" style="left: calc(var(--cell-size) / 2 + 6 * var(--cell-size)); top: calc(var(--cell-size) / 2 + 6 * var(--cell-size));"></div>
+        
+        <!-- グリッド線と石のコンテナ -->
+        <div id="grid"></div>
+    </div>
+
+    <script>
+        const BOARD_SIZE = 9; 
+        const PROB_ORDER = [0.9, 0.1, 0.7, 0.3]; // 90, 10, 70, 30 の順番
+        
+        let board = []; 
+        let turnCount = 0; 
+        let gameOver = false;
+        let waitingForObservationChoice = false;
+
+        function initBoard() {
+            board = [];
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                let row = [];
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    row.push(null);
+                }
+                board.push(row);
+            }
+            turnCount = 0;
+            gameOver = false;
+            waitingForObservationChoice = false;
+
+            document.getElementById('observation-prompt').style.display = 'none';
+            document.getElementById('prob-display').style.display = 'block';
+            document.getElementById('restart-btn').style.display = 'none';
+            document.getElementById('status-area').style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+
+            updateUI();
+            renderBoard();
+        }
+
+        function updateUI() {
+            const turnInfo = document.getElementById('turn-info');
+            const nextProb = document.getElementById('next-prob');
+
+            let isBlackTurn = (turnCount % 2 === 0);
+            if (!waitingForObservationChoice) {
+                if (isBlackTurn) {
+                    turnInfo.innerText = "先攻のターン (黒) - 石を置く場所を選んでください";
+                    turnInfo.className = "turn-first";
+                } else {
+                    turnInfo.innerText = "後攻のターン (白) - 石を置く場所を選んでください";
+                    turnInfo.className = "turn-second";
+                }
+            }
+
+            let probIndex = turnCount % PROB_ORDER.length;
+            let prob = PROB_ORDER[probIndex];
+            nextProb.innerText = (prob * 100) + "%";
+        }
+
+        function renderBoard() {
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+
+            const cellSize = 45;
+
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    let area = document.createElement('div');
+                    area.className = 'intersection-area';
+                    area.style.left = (c * cellSize) + 'px';
+                    area.style.top = (r * cellSize) + 'px';
+                    
+                    if (board[r][c] === null && !gameOver && !waitingForObservationChoice) {
+                        area.onclick = () => placeStone(r, c);
+                    }
+                    grid.appendChild(area);
+
+                    let cellData = board[r][c];
+                    if (cellData !== null) {
+                        let stone = document.createElement('div');
+                        stone.style.left = (c * cellSize) + 'px';
+                        stone.style.top = (r * cellSize) + 'px';
+
+                        if (cellData.observed) {
+                            stone.className = `stone ${cellData.color === 'black' ? 'stone-black' : 'stone-white'}`;
+                        } else {
+                            stone.className = 'stone stone-quantum';
+                            stone.innerText = Math.round(cellData.prob * 100);
+                            stone.style.backgroundColor = getQuantumColor(cellData.prob);
+                        }
+                        grid.appendChild(stone);
+                    }
+                }
+            }
+        }
+
+        function getQuantumColor(prob) {
+            let darkness = Math.floor(255 * (1 - prob));
+            return `rgb(${darkness*0.8}, ${darkness*0.8}, ${darkness})`;
+        }
+
+        // 縦・横・斜めのいずれかの直線上に「5個以上の石」が置かれている（＝5目並ぶ可能性のあるラインが存在する）かチェック
+        function hasLineWithAtLeastFiveStones() {
+            const targetLength = 5;
+
+            // 横方向の各ラインをチェック
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c <= BOARD_SIZE - targetLength; c++) {
+                    let stoneCountInLine = 0;
+                    for (let i = 0; i < targetLength; i++) {
+                        if (board[r][c + i] !== null) {
+                            stoneCountInLine++;
+                        }
+                    }
+                    if (stoneCountInLine >= targetLength) return true;
+                }
+            }
+
+            // 縦方向の各ラインをチェック
+            for (let r = 0; r <= BOARD_SIZE - targetLength; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    let stoneCountInLine = 0;
+                    for (let i = 0; i < targetLength; i++) {
+                        if (board[r + i][c] !== null) {
+                            stoneCountInLine++;
+                        }
+                    }
+                    if (stoneCountInLine >= targetLength) return true;
+                }
+            }
+
+            // 斜め右下方向の各ラインをチェック
+            for (let r = 0; r <= BOARD_SIZE - targetLength; r++) {
+                for (let c = 0; c <= BOARD_SIZE - targetLength; c++) {
+                    let stoneCountInLine = 0;
+                    for (let i = 0; i < targetLength; i++) {
+                        if (board[r + i][c + i] !== null) {
+                            stoneCountInLine++;
+                        }
+                    }
+                    if (stoneCountInLine >= targetLength) return true;
+                }
+            }
+
+            // 斜め右上方向の各ラインをチェック
+            for (let r = targetLength - 1; r < BOARD_SIZE; r++) {
+                for (let c = 0; c <= BOARD_SIZE - targetLength; c++) {
+                    let stoneCountInLine = 0;
+                    for (let i = 0; i < targetLength; i++) {
+                        if (board[r - i][c + i] !== null) {
+                            stoneCountInLine++;
+                        }
+                    }
+                    if (stoneCountInLine >= targetLength) return true;
+                }
+            }
+
+            return false;
+        }
+
+        function placeStone(r, c) {
+            if (gameOver || board[r][c] !== null || waitingForObservationChoice) return;
+
+            let probIndex = turnCount % PROB_ORDER.length;
+            let prob = PROB_ORDER[probIndex];
+
+            // 石を置く
+            board[r][c] = {
+                prob: prob,
+                observed: false,
+                color: null
+            };
+
+            renderBoard();
+
+            // 判定：同一直線上に5個以上の石が揃う可能性があるか？
+            if (hasLineWithAtLeastFiveStones()) {
+                // 条件を満たした場合のみ、観測するかどうかを選択するフェーズへ
+                waitingForObservationChoice = true;
+                document.getElementById('prob-display').style.display = 'none';
+                document.getElementById('observation-prompt').style.display = 'block';
+                document.getElementById('turn-info').innerText = "【チャンス】 観測して勝負に賭けますか？";
+            } else {
+                // 条件を満たしていなければ、選択させずに自動で次のターンへ移行
+                finishTurnStep();
+            }
+        }
+
+        function resolveTurn(willObserve) {
+            if (willObserve) {
+                // すべての未観測の石を確率に従って一時的に確定させる
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        let cell = board[r][c];
+                        if (cell !== null && !cell.observed) {
+                            let rand = Math.random();
+                            cell.color = rand < cell.prob ? 'black' : 'white';
+                            cell.observed = true;
+                        }
+                    }
+                }
+
+                // 観測結果の盤面を表示
+                renderBoard();
+
+                setTimeout(() => {
+                    let winner = checkWinCondition();
+
+                    if (winner) {
+                        // 観測して5目揃っていた場合 → 観測した側の勝ち！
+                        gameOver = true;
+                        renderBoard();
+                        alert(`【観測成功！】 ${winner === 'black' ? '黒' : '白'} が 5目 揃いました！勝利です！`);
+                        
+                        document.getElementById('turn-info').innerHTML = `勝者: ${winner === 'black' ? '黒' : '白'} の勝利！`;
+                        document.getElementById('turn-info').className = winner === 'black' ? 'turn-first' : 'turn-second';
+                        document.getElementById('observation-prompt').style.display = 'none';
+                        document.getElementById('restart-btn').style.display = 'inline-block';
+                    } else {
+                        // 観測したが揃わなかった場合 → 元の量子状態（確率数字のまま）に戻す
+                        alert("観測しましたが、5目揃いませんでした…！\n(盤面は元の量子状態に戻ります)");
+                        
+                        for (let r = 0; r < BOARD_SIZE; r++) {
+                            for (let c = 0; c < BOARD_SIZE; c++) {
+                                if (board[r][c] !== null) {
+                                    board[r][c].observed = false;
+                                    board[r][c].color = null;
+                                }
+                            }
+                        }
+
+                        finishTurnStep();
+                    }
+                }, 100);
+
+            } else {
+                // 「いいえ」を選んだ場合、そのまま次のプレイヤーのターンへ
+                finishTurnStep();
+            }
+        }
+
+        function finishTurnStep() {
+            waitingForObservationChoice = false;
+            document.getElementById('observation-prompt').style.display = 'none';
+            document.getElementById('prob-display').style.display = 'block';
+            
+            turnCount++;
+            updateUI();
+            renderBoard();
+        }
+
+        function checkWinCondition() {
+            const targetLength = 5; // 5目で勝利
+
+            // 横
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c <= BOARD_SIZE - targetLength; c++) {
+                    let color = board[r][c]?.observed ? board[r][c].color : null;
+                    if (!color) continue;
+                    let win = true;
+                    for (let i = 1; i < targetLength; i++) {
+                        if (!board[r][c+i]?.observed || board[r][c+i].color !== color) { win = false; break; }
+                    }
+                    if (win) return color;
+                }
+            }
+
+            // 縦
+            for (let r = 0; r <= BOARD_SIZE - targetLength; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    let color = board[r][c]?.observed ? board[r][c].color : null;
+                    if (!color) continue;
+                    let win = true;
+                    for (let i = 1; i < targetLength; i++) {
+                        if (!board[r+i][c]?.observed || board[r+i][c].color !== color) { win = false; break; }
+                    }
+                    if (win) return color;
+                }
+            }
+
+            // 斜め右下
+            for (let r = 0; r <= BOARD_SIZE - targetLength; r++) {
+                for (let c = 0; c <= BOARD_SIZE - targetLength; c++) {
+                    let color = board[r][c]?.observed ? board[r][c].color : null;
+                    if (!color) continue;
+                    let win = true;
+                    for (let i = 1; i < targetLength; i++) {
+                        if (!board[r+i][c+i]?.observed || board[r+i][c+i].color !== color) { win = false; break; }
+                    }
+                    if (win) return color;
+                }
+            }
+
+            // 斜め右上
+            for (let r = targetLength - 1; r < BOARD_SIZE; r++) {
+                for (let c = 0; c <= BOARD_SIZE - targetLength; c++) {
+                    let color = board[r][c]?.observed ? board[r][c].color : null;
+                    if (!color) continue;
+                    let win = true;
+                    for (let i = 1; i < targetLength; i++) {
+                        if (!board[r-i][c+i]?.observed || board[r-i][c+i].color !== color) { win = false; break; }
+                    }
+                    if (win) return color;
+                }
+            }
+
+            return null;
+        }
+
+        initBoard();
+    </script>
+</body>
+</html>
